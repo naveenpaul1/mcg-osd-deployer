@@ -57,6 +57,23 @@ spec:
           - list
           - update
           - watch
+          - config.openshift.io
+          resources:
+          - clusterversions
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - config.openshift.io
+          resources:
+          - clusterversions/finalizers
+          verbs:
+          - update
         - apiGroups:
           - console.openshift.io
           resources:
@@ -266,24 +283,6 @@ spec:
           - get
           - list
           - watch
-        - apiGroups:
-          - config.openshift.io
-          resources:
-          - clusterversions
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
-          - config.openshift.io
-          resources:
-          - clusterversions/finalizers
-          verbs:
-          - update
         - apiGroups:
           - coordination.k8s.io
           resources:
