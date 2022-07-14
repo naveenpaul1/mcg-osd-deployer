@@ -74,6 +74,25 @@ spec:
           - clusterversions/finalizers
           verbs:
           - update
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - create
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - secrets
+          verbs:
+          - create
+          - get
+          - list
+          - update
+          - watch
         - apiGroups:
           - console.openshift.io
           resources:
