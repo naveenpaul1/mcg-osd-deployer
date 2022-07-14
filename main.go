@@ -36,6 +36,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	obv1 "github.com/kube-object-storage/lib-bucket-provisioner/pkg/apis/objectbucket.io/v1alpha1"
@@ -67,6 +68,11 @@ const (
 )
 
 func init() {
+
+	addAllSchemes(scheme)
+}
+
+func addAllSchemes(scheme *runtime.Scheme) {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(mcgv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(noobaa.AddToScheme(scheme))
@@ -117,6 +123,7 @@ func main() {
 	addonName := envMap[addonNameKey]
 	if err = (&controllers.ManagedMCGReconciler{
 		Client:                       mgr.GetClient(),
+		UnrestrictedClient:           getUnrestrictedClient(),
 		Log:                          ctrl.Log.WithName("controllers").WithName("ManagedMCG"),
 		Scheme:                       mgr.GetScheme(),
 		AddonParamSecretName:         fmt.Sprintf("addon-%v-parameters", addonName),
@@ -183,4 +190,18 @@ func ensureManagedMCG(c client.Client, log logr.Logger, envMap map[string]string
 	default:
 		return fmt.Errorf("failed to create ManagedMCG resource: %w", err)
 	}
+}
+
+// getUnrestrictedClient creates a client required for listing PVCs from all namespaces.
+func getUnrestrictedClient() client.Client {
+	var options client.Options
+
+	options.Scheme = runtime.NewScheme()
+	addAllSchemes(options.Scheme)
+	k8sClient, err := client.New(config.GetConfigOrDie(), options)
+	if err != nil {
+		setupLog.Error(err, "error creating client")
+		os.Exit(1)
+	}
+	return k8sClient
 }

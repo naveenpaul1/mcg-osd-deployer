@@ -18,11 +18,15 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/kube-object-storage/lib-bucket-provisioner/pkg/apis/objectbucket.io/v1alpha1"
 	noobaav1alpha1 "github.com/noobaa/noobaa-operator/v5/pkg/apis/noobaa/v1alpha1"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,6 +36,8 @@ const (
 	McgmsObcNamespace   = "mcgms-obc-namespace"
 	DefaultBackingStore = "noobaa-default-backing-store"
 	READY               = "Ready"
+	rhodsNamesapce      = "rhods-notebooks"
+	rhodsSecretName     = "rhods-secret-name"
 )
 
 func (r *ManagedMCGReconciler) bucketClassAdded(object client.Object) {
@@ -56,11 +62,67 @@ func (r *ManagedMCGReconciler) bucketClassAdded(object client.Object) {
 
 			return nil
 		})
-		if err != nil {
-			r.Log.Error(err, "Error while creating OBC, OBC not created")
+		r.shareSecretWithRhods(annotations, err)
+	}
+}
 
-			return
+func (r *ManagedMCGReconciler) shareSecretWithRhods(annotations map[string]string, err error) bool {
+	rhodsSecret := ""
+	var ok bool
+	if rhodsSecret, ok = annotations[rhodsSecretName]; !ok || rhodsSecret == "" {
+		r.Log.Info("rhods secret name annotations missing")
+		return true
+	}
+	rohdsSecret := GetSecret(rhodsSecret, rhodsNamesapce)
+	err = r.UnrestrictedClient.Get(r.ctx, types.NamespacedName{
+		Name:      rhodsSecret,
+		Namespace: rhodsNamesapce,
+	}, rohdsSecret)
+	if err != nil {
+		r.Log.Error(err, "rhods secret missing")
+		return true
+	}
+	timeout := 10 * time.Second
+	interval := 2 * time.Second
+	secretName := r.objectBucketClaim.Name
+	secretNamespace := r.objectBucketClaim.Namespace
+	obcSecret := GetSecret(secretName, secretNamespace)
+	err = utilwait.PollImmediate(interval, timeout, func() (done bool, err error) {
+		erro := r.UnrestrictedClient.Get(r.ctx, types.NamespacedName{
+			Name:      secretName,
+			Namespace: secretNamespace,
+		}, obcSecret)
+		if erro != nil {
+			return false, err
 		}
+		if obcSecret.UID == "" {
+			return false, fmt.Errorf("Error reconciling ManagedMCG")
+		}
+		return true, nil
+	})
+	if err != nil {
+		r.Log.Error(err, "Unable to get OBC Secret")
+	}
+	if len(obcSecret.Data) == 0 || rohdsSecret.UID == "" {
+		r.Log.Info("OBC or RRHODS secret is missing")
+		return true
+	}
+	for k, v := range obcSecret.Data {
+		rohdsSecret.Data[k] = v
+	}
+	rohdsSecret.Data["BUCKET_HOST"] = []byte("s3." + r.namespace + ".svc")
+	if err := r.UnrestrictedClient.Update(r.ctx, rohdsSecret); err != nil {
+		r.Log.Error(err, "failed to update RHODS secret:")
+	}
+	return false
+}
+
+func GetSecret(name string, namespace string) *v1.Secret {
+	return &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
 	}
 }
 

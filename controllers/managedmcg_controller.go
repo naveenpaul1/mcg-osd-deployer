@@ -79,6 +79,7 @@ type ManagedMCGReconciler struct {
 	AddonConfigMapDeleteLabelKey string
 	AddonConfigMapName           string
 	Client                       client.Client
+	UnrestrictedClient           client.Client
 	Log                          logr.Logger
 	Scheme                       *runtime.Scheme
 	AddonParamSecretName         string
@@ -164,8 +165,8 @@ func (r *ManagedMCGReconciler) initializeReconciler(req ctrl.Request) {
 // Please keep the RBAC specifications below sorted, in order to prevent merge conflicts originating from this part of
 // the code in the future.
 
-//+kubebuilder:rbac:groups="",namespace=system,resources=configmaps,verbs=create;get;list;watch;update
-//+kubebuilder:rbac:groups="",namespace=system,resources=secrets,verbs=get;list;watch;create;update
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=create;get;list;watch;update
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update
 //+kubebuilder:rbac:groups="",namespace=system,resources={services,endpoints},verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="apps",namespace=system,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="apps",namespace=system,resources=deployments/finalizers,verbs=update
@@ -306,7 +307,7 @@ func (r *ManagedMCGReconciler) reconcileResources() error {
 	}
 
 	if err := r.reconcileEgressNetworkPolicy(); err != nil {
-		return err
+		r.Log.Error(err, "failed to update egress network policy")
 	}
 	if err := r.reconcileIngressNetworkPolicy(); err != nil {
 		return err
@@ -322,26 +323,11 @@ func (r *ManagedMCGReconciler) reconcileEgressNetworkPolicy() error {
 			return err
 		}
 		desired := templates.EgressNetworkPolicyTemplate.DeepCopy()
-
-		if r.deadMansSnitchSecret.UID == "" {
-			if err := r.get(r.deadMansSnitchSecret); err != nil {
-				return fmt.Errorf("unable to get deadMan's snitch secret: %w", err)
-			}
-		}
-		dmsURL := string(r.deadMansSnitchSecret.Data["SNITCH_URL"])
-		if dmsURL == "" {
-			return fmt.Errorf("DeadMan's Snitch secret does not contain a SNITCH_URL entry")
-		}
 		snitchURL, err := url.Parse(string(r.deadMansSnitchSecret.Data["SNITCH_URL"]))
-		if err != nil {
+		if err != nil || snitchURL.Host == "" {
 			return fmt.Errorf("unable to parse dms url: %w", err)
 		}
 
-		if r.smtpSecret.UID == "" {
-			if err := r.get(r.smtpSecret); err != nil {
-				return fmt.Errorf("unable to get smtp secret: %w", err)
-			}
-		}
 		smtpHost := string(r.smtpSecret.Data["host"])
 		if smtpHost == "" {
 			return fmt.Errorf("smtp secret does not contain a host entry")
@@ -486,7 +472,7 @@ func (r *ManagedMCGReconciler) deleteOBCResources(obcName string) {
 	err := r.get(configMap)
 	if err != nil {
 		if !errors.IsNotFound(err) {
-			r.Log.Error(err, "Unable to get  OBC configmap")
+			r.Log.Error(err, "Unable to get OBC configmap")
 		}
 	}
 
@@ -501,7 +487,7 @@ func (r *ManagedMCGReconciler) deleteOBCResources(obcName string) {
 	err = r.get(secret)
 	if err != nil {
 		if !errors.IsNotFound(err) {
-			r.Log.Error(err, "Unable to get  OBC secret")
+			r.Log.Error(err, "Unable to get OBC secret")
 		}
 	}
 	secret.SetFinalizers(

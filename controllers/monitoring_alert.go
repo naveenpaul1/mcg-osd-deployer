@@ -104,7 +104,7 @@ func (r *ManagedMCGReconciler) reconcileAlertMonitoring() error {
 		return err
 	}
 	if err := r.reconcileAlertmanagerConfig(); err != nil {
-		return err
+		r.Log.Error(err, "Failed to configure Alertmanager")
 	}
 	if err := r.reconcileMonitoringResources(); err != nil {
 		return err
@@ -270,14 +270,18 @@ func (r *ManagedMCGReconciler) configReceiver(dmsURL string, alertingAddressList
 		receiver := &desired.Spec.Receivers[i]
 		switch receiver.Name {
 		case "pagerduty":
-			receiver.PagerDutyConfigs[0].ServiceKey.Key = "PAGERDUTY_KEY"
-			receiver.PagerDutyConfigs[0].ServiceKey.LocalObjectReference.Name = r.PagerdutySecretName
-			receiver.PagerDutyConfigs[0].Details[0].Key = "SOP"
-			receiver.PagerDutyConfigs[0].Details[0].Value = r.SOPEndpoint
+			if r.pagerdutySecret.UID != "" {
+				receiver.PagerDutyConfigs[0].ServiceKey.Key = string(r.pagerdutySecret.Data["PAGERDUTY_KEY"])
+				receiver.PagerDutyConfigs[0].ServiceKey.LocalObjectReference.Name = r.PagerdutySecretName
+				receiver.PagerDutyConfigs[0].Details[0].Key = "SOP"
+				receiver.PagerDutyConfigs[0].Details[0].Value = r.SOPEndpoint
+			}
 		case "DeadMansSnitch":
-			receiver.WebhookConfigs[0].URL = &dmsURL
+			if dmsURL != "" {
+				receiver.WebhookConfigs[0].URL = &dmsURL
+			}
 		case "SendGrid":
-			if len(alertingAddressList) > 0 {
+			if len(alertingAddressList) > 0 && r.smtpSecret.UID != "" {
 				receiver.EmailConfigs[0].Smarthost = fmt.Sprintf("%s:%s", r.smtpSecret.Data["host"], r.smtpSecret.Data["port"])
 				receiver.EmailConfigs[0].AuthUsername = string(r.smtpSecret.Data["username"])
 				receiver.EmailConfigs[0].AuthPassword.LocalObjectReference.Name = r.SMTPSecretName
